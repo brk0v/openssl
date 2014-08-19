@@ -30,6 +30,10 @@ static long SSL_CTX_set_options_not_a_macro(SSL_CTX* ctx, long options) {
    return SSL_CTX_set_options(ctx, options);
 }
 
+static long SSL_CTX_get_options_not_a_macro(SSL_CTX* ctx) {
+   return SSL_CTX_get_options(ctx);
+}
+
 static long SSL_CTX_set_mode_not_a_macro(SSL_CTX* ctx, long modes) {
    return SSL_CTX_set_mode(ctx, modes);
 }
@@ -56,6 +60,10 @@ static long SSL_CTX_set_tmp_ecdh_not_a_macro(SSL_CTX* ctx, EC_KEY *key) {
 
 static long SSL_CTX_set_tlsext_ticket_key_cb_not_a_macro(SSL_CTX *sslctx, int (*cb)(SSL *con, unsigned char *key_name, unsigned char *iv, EVP_CIPHER_CTX *ctx, HMAC_CTX *hctx, int enc)) {
     return SSL_CTX_set_tlsext_ticket_key_cb(sslctx, cb);
+}
+
+static long SSL_CTX_set_tlsext_servername_callback_not_a_macro(SSL_CTX* ctx,  int (*cb)(SSL *con, int *ad, void *args)) {
+	return SSL_CTX_set_tlsext_servername_callback(ctx, cb);
 }
 
 #ifndef SSL_MODE_RELEASE_BUFFERS
@@ -88,6 +96,10 @@ static const SSL_METHOD *OUR_TLSv1_2_method() {
 #define tls_session_ticket_md  EVP_sha256
 #endif
 
+#if defined SSL_CTRL_SET_TLSEXT_HOSTNAME
+	extern int sni_cb(SSL *ssl_conn, int *ad, void *arg);
+#endif
+
 extern int verify_cb(int ok, X509_STORE_CTX* store);
 extern int ticket_cb(SSL *con, unsigned char *key_name, unsigned char *iv, EVP_CIPHER_CTX *ctx, HMAC_CTX *hctx, int enc);
 */
@@ -116,6 +128,7 @@ type Ctx struct {
 	verify_cb VerifyCallback
 	tickets   []*TLSTicket 
 	ticket_cb TLSTicketCallback
+	sni_cb    TLSExtServernameCallback
 }
 
 //export get_ssl_ctx_idx
@@ -428,6 +441,12 @@ func (c *Ctx) SetOptions(options Options) Options {
 		c.ctx, C.long(options)))
 }
 
+// GetOptions returns context options. See
+// https://www.openssl.org/docs/ssl/SSL_CTX_set_options.html
+func (c *Ctx) GetOptions() Options {
+	return Options(C.SSL_CTX_get_options_not_a_macro(c.ctx))
+}
+
 type Modes int
 
 const (
@@ -498,6 +517,10 @@ func (c *Ctx) SetVerifyCallback(verify_cb VerifyCallback) {
 	c.SetVerify(c.VerifyMode(), verify_cb)
 }
 
+func (c *Ctx) GetVerifyCallback() VerifyCallback {
+	return c.verify_cb
+}
+
 func (c *Ctx) VerifyMode() VerifyOptions {
 	return VerifyOptions(C.SSL_CTX_get_verify_mode(c.ctx))
 }
@@ -507,6 +530,23 @@ func (c *Ctx) VerifyMode() VerifyOptions {
 // https://www.openssl.org/docs/ssl/SSL_CTX_set_verify.html
 func (c *Ctx) SetVerifyDepth(depth int) {
 	C.SSL_CTX_set_verify_depth(c.ctx, C.int(depth))
+}
+
+// GetVerifyDepth controls how many certificates deep the certificate
+// verification logic is willing to follow a certificate chain. See
+// https://www.openssl.org/docs/ssl/SSL_CTX_set_verify.html
+func (c *Ctx) GetVerifyDepth() int {
+	return int(C.SSL_CTX_get_verify_depth(c.ctx))
+}
+
+type TLSExtServernameCallback func(ssl *SSL) SSLTLSExtErr
+
+// SetTLSExtServernameCallback sets callback function for Server Name Indication 
+// (SNI) rfc6066 (http://tools.ietf.org/html/rfc6066). See
+// http://stackoverflow.com/questions/22373332/serving-multiple-domains-in-one-box-with-sni
+func (c *Ctx) SetTLSExtServernameCallback(sni_cb TLSExtServernameCallback) {
+	c.sni_cb = sni_cb
+	C.SSL_CTX_set_tlsext_servername_callback_not_a_macro(c.ctx, (*[0]byte)(C.sni_cb))
 }
 
 func (c *Ctx) SetSessionId(session_id []byte) error {
